@@ -1,0 +1,6 @@
+{
+  "name": "Professional Calendar",
+  "description": "Offline-first Personal Planner System with Gregorian, Hijri & Bangla calendars, Tasks, Notes, Countdowns, Date Calculator, Statistics, and Daily Briefings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

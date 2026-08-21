@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Calendar</string>
+    <string name="widget_name">বাংলা ও ইসলামিক ক্যালেন্ডার</string>
+    <string name="widget_description">স্মার্ট বাংলা, হিজরি ও গ্রেগরিয়ান তারিখ, আজকের ইভেন্ট ও ফটো উইজেট</string>
+</resources>

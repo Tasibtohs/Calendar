@@ -1,0 +1,112 @@
+name: Android CI Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build Type (debug / all)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - debug
+          - all
+
+jobs:
+  build:
+    name: Build Android APK & Bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # CRITICAL FOR GITHUB: Fix executable permission for gradlew
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Ensure .env exists so Secrets Gradle Plugin succeeds
+      - name: Prepare environment configuration (.env)
+        run: |
+          if [ ! -f ".env" ]; then
+            if [ -f ".env.example" ]; then
+              cp .env.example .env
+            else
+              touch .env
+            fi
+          fi
+          # If repository secrets exist, append them
+          if [ -n "${{ secrets.OPENWEATHER_API_KEY }}" ]; then
+            echo "OPENWEATHER_API_KEY=${{ secrets.OPENWEATHER_API_KEY }}" >> .env
+          fi
+
+      # Setup debug.keystore
+      - name: Setup Keystore
+        run: |
+          if [ ! -f "debug.keystore" ]; then
+            if [ -f "debug.keystore.base64" ]; then
+              base64 -d debug.keystore.base64 > debug.keystore
+            else
+              keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            fi
+          fi
+
+      # Run unit tests
+      - name: Run Unit Tests
+        run: ./gradlew testDebugUnitTest --continue
+
+      # Build Debug APK
+      - name: Build Debug APK (assembleDebug)
+        run: ./gradlew assembleDebug --stacktrace
+
+      # Build Debug Bundle (AAB)
+      - name: Build Android App Bundle (bundleDebug)
+        run: ./gradlew bundleDebug --stacktrace
+
+      # Upload Debug APK
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BengaliCalendar-Debug-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      # Upload Android App Bundle
+      - name: Upload App Bundle Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BengaliCalendar-Debug-AAB
+          path: app/build/outputs/bundle/debug/*.aab
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Create Release on Tag Push
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/bundle/debug/*.aab
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
