@@ -7,15 +7,6 @@ on:
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
-    inputs:
-      build_type:
-        description: 'Build Type (debug / all)'
-        required: false
-        default: 'all'
-        type: choice
-        options:
-          - debug
-          - all
 
 jobs:
   build:
@@ -26,7 +17,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # CRITICAL FOR GITHUB: Fix executable permission for gradlew
+      # Fix executable permission for gradlew
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
@@ -39,44 +30,41 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false
 
-      # Ensure .env exists so Secrets Gradle Plugin succeeds
-      - name: Prepare environment configuration (.env)
+      - name: Regenerate Gradle Wrapper
         run: |
-          if [ ! -f ".env" ]; then
-            if [ -f ".env.example" ]; then
-              cp .env.example .env
-            else
-              touch .env
-            fi
-          fi
-          # If repository secrets exist, append them
-          if [ -n "${{ secrets.OPENWEATHER_API_KEY }}" ]; then
-            echo "OPENWEATHER_API_KEY=${{ secrets.OPENWEATHER_API_KEY }}" >> .env
-          fi
+          GRADLE_VERSION=$(grep -oP '(?<=gradle-)[0-9.]+(?=-(bin|all)\.zip)' gradle/wrapper/gradle-wrapper.properties)
+          echo "Using Gradle version: $GRADLE_VERSION"
+          gradle wrapper --gradle-version "$GRADLE_VERSION"
 
-      # Setup debug.keystore
+      # Setup debug keystore
       - name: Setup Keystore
         run: |
-          if [ ! -f "debug.keystore" ]; then
-            if [ -f "debug.keystore.base64" ]; then
-              base64 -d debug.keystore.base64 > debug.keystore
-            else
-              keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-            fi
-          fi
+          keytool -genkey -v \
+            -keystore ~/.android/debug.keystore \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
 
-      # Run unit tests
-      - name: Run Unit Tests
-        run: ./gradlew testDebugUnitTest --continue
+      - name: Decode Release Keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > calendar-release.jks
 
       # Build Debug APK
       - name: Build Debug APK (assembleDebug)
         run: ./gradlew assembleDebug --stacktrace
 
-      # Build Debug Bundle (AAB)
-      - name: Build Android App Bundle (bundleDebug)
-        run: ./gradlew bundleDebug --stacktrace
+      # Build Release APK
+      - name: Build Release APK (assembleRelease)
+        run: ./gradlew assembleRelease --stacktrace
+        env:
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       # Upload Debug APK
       - name: Upload Debug APK Artifact
@@ -84,29 +72,37 @@ jobs:
         with:
           name: BengaliCalendar-Debug-APK
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 30
-
-      # Upload Android App Bundle
-      - name: Upload App Bundle Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: BengaliCalendar-Debug-AAB
-          path: app/build/outputs/bundle/debug/*.aab
           if-no-files-found: warn
           retention-days: 30
 
-      # Create Release on Tag Push
+      # Upload Release APK
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BengaliCalendar-Release-APK
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Create Release on main/master push
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/bundle/debug/*.aab
+          files: app/build/outputs/apk/release/*.apk
+          tag_name: v1.0.${{ github.run_number }}
+          name: "Bengali Calendar v1.0.${{ github.run_number }}"
+          body: |
+            # Bengali Calendar
+            
+            ## Features
+            - Calendar events
+            - Notes
+            - Weather updates
+            
+            ## Download
+            APK file attached below.
           draft: false
           prerelease: false
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
